@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Aether</title>
+<style>
+  :root { --bg:#08080b; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    height:100%; background:var(--bg); overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:#e8e8ea; -webkit-font-smoothing:antialiased;
+  }
+
+  #video {
+    position:fixed; inset:0; width:100%; height:100%;
+    object-fit:cover; transform:scaleX(-1);
+    opacity:0; transition:opacity .5s ease; z-index:1;
+    filter:saturate(1.05) contrast(1.02);
+  }
+  body.cam-on #video { opacity:.5; }
+
+  #c { position:fixed; inset:0; z-index:2; display:block; }
+
+  #vignette {
+    position:fixed; inset:0; z-index:3; pointer-events:none;
+    background:radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.55) 100%);
+  }
+
+  .title {
+    position:fixed; top:26px; left:30px; z-index:5;
+    font-family:Georgia,"Times New Roman",serif;
+    font-size:30px; font-weight:500; letter-spacing:.01em; color:#f2f2f4;
+    line-height:1;
+  }
+  .title small {
+    display:block; margin-top:8px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    font-size:10.5px; letter-spacing:.24em; text-transform:uppercase;
+    color:#71717a; font-weight:500;
+  }
+
+  .status {
+    position:fixed; top:31px; right:30px; z-index:5;
+    font-size:11.5px; letter-spacing:.13em; text-transform:uppercase;
+    color:#82828c; font-variant-numeric:tabular-nums; text-align:right;
+  }
+
+  .hint {
+    position:fixed; bottom:26px; left:50%; transform:translateX(-50%); z-index:5;
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:#56565f; text-align:center; white-space:nowrap; max-width:92vw; overflow:hidden;
+  }
+  .hint b { color:#8a8a93; font-weight:600; }
+
+  .controls { position:fixed; bottom:22px; right:26px; z-index:6; }
+  .btn {
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.14);
+    color:#d6d6da; padding:10px 16px; border-radius:999px;
+    font-size:11.5px; letter-spacing:.11em; text-transform:uppercase; cursor:pointer;
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    transition:background .2s, border-color .2s, color .2s;
+  }
+  .btn:hover { background:rgba(255,255,255,.09); border-color:rgba(255,255,255,.28); color:#fff; }
+  .btn.active { background:rgba(255,255,255,.14); border-color:rgba(255,255,255,.4); color:#fff; }
+  .btn:focus-visible { outline:2px solid rgba(255,255,255,.6); outline-offset:2px; }
+
+  .overlay {
+    position:fixed; inset:0; z-index:10;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:22px; padding:24px; text-align:center;
+    background:rgba(6,6,9,.72); -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
+    transition:opacity .6s ease;
+  }
+  .overlay.hidden { opacity:0; pointer-events:none; }
+  .overlay h1 {
+    font-family:Georgia,"Times New Roman",serif; font-weight:500;
+    font-size:42px; letter-spacing:.01em; color:#f4f4f6;
+  }
+  .overlay p { max-width:430px; font-size:14px; line-height:1.65; color:#9a9aa2; }
+  .start {
+    background:#f2f2f4; color:#0a0a0c; border:none;
+    padding:13px 34px; border-radius:999px; cursor:pointer; font-weight:600;
+    font-size:12.5px; letter-spacing:.15em; text-transform:uppercase;
+    transition:transform .15s ease, background .2s;
+  }
+  .start:hover { transform:translateY(-1px); background:#fff; }
+  .start:disabled { opacity:.55; cursor:default; transform:none; }
+  .start:focus-visible { outline:2px solid rgba(255,255,255,.7); outline-offset:3px; }
+  .err { color:#ff8f8f; font-size:12.5px; line-height:1.6; max-width:450px; min-height:1em; }
+
+  @media (max-width:560px) {
+    .title { font-size:24px; top:20px; left:20px; }
+    .status { top:22px; right:20px; font-size:10.5px; }
+    .hint { font-size:9.5px; letter-spacing:.1em; bottom:78px; }
+    .controls { bottom:20px; right:50%; transform:translateX(50%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #video, .overlay, .btn, .start { transition:none; }
+  }
+</style>
+</head>
+<body>
+  <video id="video" playsinline muted></video>
+  <canvas id="c"></canvas>
+  <div id="vignette"></div>
+
+  <div class="title">Aether<small>hand&#8202;-&#8202;reactive field</small></div>
+  <div class="status" id="status">waiting</div>
+  <div class="hint">
+    <b>one hand</b> move &amp; spin&nbsp;&nbsp;·&nbsp;&nbsp;<b>pinch</b> charge &amp; burst&nbsp;&nbsp;·&nbsp;&nbsp;<b>two hands</b> resize&nbsp;&nbsp;·&nbsp;&nbsp;<b>fingers</b> color
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="camBtn" aria-pressed="false">Webcam: Off</button>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <h1>Aether</h1>
+    <p>A field of 3000 particles that follows your hands. Move to steer and spin it, pinch and hold to charge a burst, spread two hands apart to grow it, and change how many fingers you hold up to shift its color.</p>
+    <button class="start" id="startBtn">Begin</button>
+    <div class="err" id="err"></div>
+  </div>
+
+  <!-- MediaPipe Hands (pinned for stability) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+
+  <script>
+  "use strict";
+
+  // ---------- config ----------
+  const N = 3000;            // particle count
+  const FOV = 640;           // perspective focal length
+  const BASE = 8;            // sprite draw size (px) at depth 1
+  const CHARGE_TIME = 1.1;   // seconds to fully charge
+  const PINCH_T = 0.45;      // pinch distance / hand size threshold
+  const ROT_K = 4.0;         // hand-velocity -> rotation gain
+  const EXPLODE_DUR = 0.7;   // seconds of outward flight
+  const REFORM_DUR = 1.6;    // seconds to reform after flight
+
+  // finger count 0..5 -> color
+  const COLORS = [
+    [ 80,150,255],  // 0 (fist)  blue
+    [  0,220,210],  // 1         teal
+    [150,110,255],  // 2         violet
+    [255, 90,160],  // 3         pink
+    [255,180, 80],  // 4         amber
+    [180,255,200],  // 5         mint
+  ];
+
+  // ---------- helpers ----------
+  const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
+  const dist  = (a,b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const map   = (v,a,b,c,d) => c + clamp((v - a) / (b - a), 0, 1) * (d - c);
+
+  // ---------- dom ----------
+  const canvas   = document.getElementById("c");
+  const ctx      = canvas.getContext("2d");
+  const video    = document.getElementById("video");
+  const statusEl = document.getElementById("status");
+  const overlay  = document.getElementById("overlay");
+  const startBtn = document.getElementById("startBtn");
+  const camBtn   = document.getElementById("camBtn");
+  const errEl    = document.getElementById("err");
+
+  // ---------- state ----------
+  let cw = 0, ch = 0, dpr = 1, R = 260;
+
+  const hx = new Float32Array(N), hy = new Float32Array(N), hz = new Float32Array(N); // home dir
+  const px = new Float32Array(N), py = new Float32Array(N), pz = new Float32Array(N); // position
+  const vx = new Float32Array(N), vy = new Float32Array(N), vz = new Float32Array(N); // velocity
+
+  let rotX = 0, rotY = 0, rotVX = 0, rotVY = 0;
+  let centerX = 0, centerY = 0, targetCX = 0, targetCY = 0;
+  let sphereScale = 1, targetScale = 1;
+
+  const color = [180,255,200];
+  const targetColor = [80,150,255];
+  let sprite = null, spriteR = -1, spriteG = -1, spriteB = -1;
+
+  let phase = "idle";        // idle | charging | exploding
+  let charge = 0, explodeT = 0, explodeIntensity = 0;
+
+  let handCount = 0, fingerCountDisplay = 0;
+  let hadHand = false, prevPX = 0, prevPY = 0;
+
+  let camOn = false;
+  let lastT = 0, lastStatus = "";
+  let hands = null, camera = null;
+
+  // ---------- particle init (fibonacci sphere) ----------
+  function initParticles() {
+    const gold = Math.PI * (1 + Math.sqrt(5));
+    for (let i = 0; i < N; i++) {
+      const phi = Math.acos(1 - 2 * (i + 0.5) / N);
+      const theta = gold * i;
+      hx[i] = Math.sin(phi) * Math.cos(theta);
+      hy[i] = Math.sin(phi) * Math.sin(theta);
+      hz[i] = Math.cos(phi);
+    }
+  }
+
+  // ---------- glow sprite ----------
+  function makeSprite(r, g, b) {
+    const s = 64;
+    const cnv = document.createElement("canvas");
+    cnv.width = cnv.height = s;
+    const x = cnv.getContext("2d");
+    const grd = x.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+    grd.addColorStop(0,    "rgba(" + r + "," + g + "," + b + ",1)");
+    grd.addColorStop(0.25, "rgba(" + r + "," + g + "," + b + ",0.65)");
+    grd.addColorStop(1,    "rgba(" + r + "," + g + "," + b + ",0)");
+    x.fillStyle = grd;
+    x.fillRect(0, 0, s, s);
+    return cnv;
+  }
+
+  // ---------- resize ----------
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    cw = window.innerWidth;
+    ch = window.innerHeight;
+    canvas.width  = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+    canvas.style.width  = cw + "px";
+    canvas.style.height = ch + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    R = clamp(Math.min(cw, ch) * 0.26, 150, 320);
+    targetCX = clamp(targetCX, 0, cw);
+    targetCY = clamp(targetCY, 0, ch);
+  }
+
+  // ---------- gesture reads (per finger, per hand) ----------
+  function palmCenter(h) {
+    let x = 0, y = 0;
+    const idx = [0, 5, 9, 13, 17];
+    for (let k = 0; k < idx.length; k++) { x += h[idx[k]].x; y += h[idx[k]].y; }
+    return { x: x / idx.length, y: y / idx.length };
+  }
+  function handSize(h) { return dist(h[0], h[9]); }
+
+  function countFingers(h) {
+    let c = 0;
+    // extended if tip is farther from wrist than its pip joint (scale/rotation tolerant)
+    const ext = (tip, pip) => dist(h[tip], h[0]) > dist(h[pip], h[0]) * 1.08;
+    if (ext(8, 6))   c++;
+    if (ext(12, 10)) c++;
+    if (ext(16, 14)) c++;
+    if (ext(20, 18)) c++;
+    // thumb: tip reaches across the hand away from the pinky knuckle
+    if (dist(h[4], h[17]) > dist(h[5], h[17]) * 1.1) c++;
+    return c;
+  }
+
+  function setTargetColor(f) {
+    const c = COLORS[clamp(f, 0, 5)];
+    targetColor[0] = c[0]; targetColor[1] = c[1]; targetColor[2] = c[2];
+  }
+
+  function handlePinch(isPinch) {
+    if (phase === "exploding") return;   // ignore while particles are out
+    if (isPinch) {
+      if (phase !== "charging") phase = "charging";
+    } else {
+      if (phase === "charging") {
+        if (charge > 0.1) triggerExplosion(charge);
+        else { phase = "idle"; charge = 0; }
+      }
+    }
+  }
+
+  function triggerExplosion(intensity) {
+    phase = "exploding";
+    explodeT = 0;
+    charge = 0;
+    explodeIntensity = clamp(intensity, 0.25, 1);
+    for (let i = 0; i < N; i++) {
+      const ox = px[i], oy = py[i], oz = pz[i];
+      const L = Math.hypot(ox, oy, oz) || 1;
+      const sp = R * (2.6 + 3.6 * explodeIntensity) * (0.55 + Math.random() * 0.9);
+      vx[i] = ox / L * sp + (Math.random() - 0.5) * sp * 0.5;
+      vy[i] = oy / L * sp + (Math.random() - 0.5) * sp * 0.5;
+      vz[i] = oz / L * sp * 0.5 + (Math.random() - 0.5) * sp * 0.25; // damp depth -> reads across screen
+    }
+  }
+
+  // ---------- mediapipe results ----------
+  function onResults(res) {
+    const raw = res.multiHandLandmarks || [];
+    handCount = raw.length;
+
+    // mirror x so movement matches the mirrored webcam
+    const hs = raw.map(function (lm) {
+      const a = new Array(21);
+      for (let k = 0; k < 21; k++) a[k] = { x: 1 - lm[k].x, y: lm[k].y };
+      return a;
+    });
+
+    if (hs.length === 0) {
+      hadHand = false;
+      handlePinch(false);
+      targetCX = cw / 2;          // ease back to center when hands leave
+      targetCY = ch / 2;
+      return;
+    }
+
+    if (hs.length === 1) {
+      const h = hs[0];
+      const c = palmCenter(h);
+      const sz = handSize(h) || 1e-4;
+
+      targetCX = c.x * cw;
+      targetCY = c.y * ch;
+
+      if (hadHand) {              // fling velocity -> spin
+        rotVY += (c.x - prevPX) * ROT_K;
+        rotVX += -(c.y - prevPY) * ROT_K;
+      }
+      prevPX = c.x; prevPY = c.y; hadHand = true;
+
+      const f = countFingers(h);
+      fingerCountDisplay = f;
+      setTargetColor(f);
+
+      handlePinch(dist(h[4], h[8]) / sz < PINCH_T);
+    } else {
+      const c0 = palmCenter(hs[0]);
+      const c1 = palmCenter(hs[1]);
+      const d = Math.hypot(c0.x - c1.x, c0.y - c1.y);
+
+      targetScale = clamp(map(d, 0.16, 0.60, 0.6, 2.35), 0.55, 2.4); // spread -> grow
+      targetCX = (c0.x + c1.x) / 2 * cw;
+      targetCY = (c0.y + c1.y) / 2 * ch;
+
+      const f = Math.max(countFingers(hs[0]), countFingers(hs[1]));
+      fingerCountDisplay = f;
+      setTargetColor(f);
+
+      hadHand = false;
+      handlePinch(false);
+    }
+  }
+
+  // ---------- physics ----------
+  function updatePhysics(dt) {
+    // smooth transitions
+    const cl = clamp(dt * 10, 0, 1);
+    color[0] += (targetColor[0] - color[0]) * cl;
+    color[1] += (targetColor[1] - color[1]) * cl;
+    color[2] += (targetColor[2] - color[2]) * cl;
+
+    sphereScale += (targetScale - sphereScale) * clamp(dt * 5, 0, 1);
+    centerX += (targetCX - centerX) * clamp(dt * 6, 0, 1);
+    centerY += (targetCY - centerY) * clamp(dt * 6, 0, 1);
+
+    // rotation: damped fling + gentle idle spin
+    rotVX *= 0.9; rotVY *= 0.9;
+    rotX += rotVX;
+    rotY += rotVY + 0.0015;
+    rotX = clamp(rotX, -1.2, 1.2);
+
+    if (phase === "charging") charge = clamp(charge + dt / CHARGE_TIME, 0, 1);
+    if (phase === "exploding") explodeT += dt;
+
+    const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+    const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+    const rs = R * sphereScale;
+    const dragF   = Math.pow(0.05, dt);            // per-second drag during flight
+    const reformF = 1 - Math.exp(-7 * dt);         // ease strength during reform
+    const reforming = phase === "exploding" && explodeT >= EXPLODE_DUR;
+
+    for (let i = 0; i < N; i++) {
+      // rotate home direction -> target sphere position
+      const X0 = hx[i], Y0 = hy[i], Z0 = hz[i];
+      const X1 = X0 * cosY + Z0 * sinY;
+      const Z1 = -X0 * sinY + Z0 * cosY;
+      const tX = X1 * rs;
+      const tY = (Y0 * cosX - Z1 * sinX) * rs;
+      const tZ = (Y0 * sinX + Z1 * cosX) * rs;
+
+      if (phase === "exploding") {
+        if (!reforming) {
+          px[i] += vx[i] * dt; py[i] += vy[i] * dt; pz[i] += vz[i] * dt;
+          vx[i] *= dragF; vy[i] *= dragF; vz[i] *= dragF;
+        } else {
+          px[i] += (tX - px[i]) * reformF;
+          py[i] += (tY - py[i]) * reformF;
+          pz[i] += (tZ - pz[i]) * reformF;
+        }
+      } else {
+        px[i] = tX; py[i] = tY; pz[i] = tZ;
+      }
+    }
+
+    if (phase === "exploding" && explodeT > EXPLODE_DUR + REFORM_DUR) phase = "idle";
+  }
+
+  // ---------- render ----------
+  function render() {
+    // keep sprite in current color
+    const cr = Math.round(color[0]), cg = Math.round(color[1]), cb = Math.round(color[2]);
+    if (cr !== spriteR || cg !== spriteG || cb !== spriteB) {
+      sprite = makeSprite(cr, cg, cb);
+      spriteR = cr; spriteG = cg; spriteB = cb;
+    }
+    const col = cr + "," + cg + "," + cb;
+
+    ctx.globalAlpha = 1;
+    // fade trails without covering the webcam: erase a bit of existing alpha
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = "rgba(0,0,0," + (camOn ? 0.34 : 0.16) + ")";
+    ctx.fillRect(0, 0, cw, ch);
+
+    // additive particle glow
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < N; i++) {
+      const z = pz[i];
+      const persp = FOV / (FOV + z);
+      if (persp <= 0.02) continue;
+      const sx = centerX + px[i] * persp;
+      const sy = centerY + py[i] * persp;
+      if (sx < -60 || sx > cw + 60 || sy < -60 || sy > ch + 60) continue;
+      const size = BASE * persp;
+      ctx.globalAlpha = clamp(persp * 0.8, 0.1, 1);
+      ctx.drawImage(sprite, sx - size / 2, sy - size / 2, size, size);
+    }
+    ctx.globalAlpha = 1;
+
+    // charge ring + burst flash
+    if (phase === "charging" || (phase === "exploding" && explodeT < 0.28)) {
+      const rr = R * sphereScale + 22;
+
+      if (phase === "charging") {
+        // faint full track
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, rr, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(" + col + ",0.10)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // glowing progress arc (layered strokes fake a soft glow)
+        const a0 = -Math.PI / 2, a1 = a0 + charge * Math.PI * 2;
+        const layers = [[10, 0.10], [5, 0.28], [2.4, 0.95]];
+        ctx.lineCap = "round";
+        for (let l = 0; l < layers.length; l++) {
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, rr, a0, a1);
+          ctx.strokeStyle = "rgba(" + col + "," + (layers[l][1] * (0.6 + 0.4 * charge)) + ")";
+          ctx.lineWidth = layers[l][0];
+          ctx.stroke();
+        }
+        ctx.lineCap = "butt";
+      } else {
+        // expanding release flash
+        const p = explodeT / 0.28;
+        const fr = rr + p * Math.max(cw, ch) * 0.5;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, fr, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(" + col + "," + ((1 - p) * 0.5) + ")";
+        ctx.lineWidth = (1 - p) * 8 + 1;
+        ctx.stroke();
+      }
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // ---------- status line ----------
+  function updateStatus() {
+    let mode;
+    if (phase === "exploding")      mode = "burst";
+    else if (phase === "charging")  mode = "charging " + Math.round(charge * 100) + "%";
+    else if (handCount >= 2)        mode = "resizing";
+    else if (handCount === 1)       mode = "steering";
+    else                            mode = "waiting for hands";
+
+    const s = handCount + " hand" + (handCount === 1 ? "" : "s") + " · " +
+              fingerCountDisplay + " finger" + (fingerCountDisplay === 1 ? "" : "s") + " · " + mode;
+    if (s !== lastStatus) { statusEl.textContent = s; lastStatus = s; }
+  }
+
+  // ---------- loop ----------
+  function frame(t) {
+    if (!lastT) lastT = t;
+    let dt = (t - lastT) / 1000;
+    lastT = t;
+    dt = clamp(dt, 0, 0.05);
+    updatePhysics(dt);
+    render();
+    updateStatus();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- camera / mediapipe ----------
+  function initHands() {
+    hands = new Hands({
+      locateFile: function (f) {
+        return "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/" + f;
+      }
+    });
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+    hands.onResults(onResults);
+  }
+
+  async function start() {
+    errEl.textContent = "";
+    if (typeof Hands === "undefined" || typeof Camera === "undefined") {
+      errEl.textContent = "Couldn't load MediaPipe. Check your internet connection and reload.";
+      return;
+    }
+    startBtn.disabled = true;
+    startBtn.textContent = "Starting…";
+    try {
+      initHands();
+      camera = new Camera(video, {
+        onFrame: async function () {
+          if (video.readyState >= 2) await hands.send({ image: video });
+        },
+        width: 1280,
+        height: 720
+      });
+      await camera.start();
+      overlay.classList.add("hidden");
+    } catch (e) {
+      const msg = (e && e.message) ? e.message : String(e);
+      errEl.textContent = "Camera unavailable (" + msg + "). If you opened this file directly, " +
+        "serve it over http — e.g. run  python -m http.server  in this folder and open localhost — then allow camera access.";
+      startBtn.disabled = false;
+      startBtn.textContent = "Begin";
+    }
+  }
+
+  function toggleCam() {
+    camOn = !camOn;
+    document.body.classList.toggle("cam-on", camOn);
+    camBtn.classList.toggle("active", camOn);
+    camBtn.setAttribute("aria-pressed", camOn ? "true" : "false");
+    camBtn.textContent = camOn ? "Webcam: On" : "Webcam: Off";
+  }
+
+  // ---------- boot ----------
+  initParticles();
+  resize();
+  centerX = targetCX = cw / 2;
+  centerY = targetCY = ch / 2;
+  window.addEventListener("resize", resize);
+  startBtn.addEventListener("click", start);
+  camBtn.addEventListener("click", toggleCam);
+  requestAnimationFrame(frame);   // sphere spins behind the overlay before the camera starts
+  </script>
+</body>
+</html>
